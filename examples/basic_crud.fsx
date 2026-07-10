@@ -10,7 +10,7 @@
 // concurrent / repeated runs don't collide, and the table is always dropped in
 // a try/finally.
 
-#I "src/Visorcraft.MongrelDB/bin/Debug/net8.0"
+#I "../src/Visorcraft.MongrelDB/bin/Debug/net8.0"
 #r "Visorcraft.MongrelDB.dll"
 
 open System
@@ -31,19 +31,37 @@ if not (db.Health()) then
     exit 1
 printfn "Connected to MongrelDB"
 
-let col id name ty pk =
+let col id name ty pk : IDictionary<string, obj> =
     let d = Dictionary<string, obj>()
     d.["id"] <- box id
     d.["name"] <- box name
     d.["ty"] <- box ty
     d.["primary_key"] <- box pk
     d.["nullable"] <- box false
-    upcast d
+    d :> IDictionary<string, obj>
 
-let cells pairs =
+/// `colEx` builds a column descriptor that includes optional enum_variants and
+/// default_value keys, which the daemon validates (enum columns require a
+/// non-empty enum_variants array).
+let colEx id name ty pk enumVariants (defaultValue: string option) : IDictionary<string, obj> =
+    let d = Dictionary<string, obj>()
+    d.["id"] <- box id
+    d.["name"] <- box name
+    d.["ty"] <- box ty
+    d.["primary_key"] <- box pk
+    d.["nullable"] <- box false
+    match enumVariants with
+    | Some v -> d.["enum_variants"] <- box v
+    | None -> ()
+    match defaultValue with
+    | Some dv -> d.["default_value"] <- box dv
+    | None -> ()
+    d :> IDictionary<string, obj>
+
+let cells pairs : IDictionary<int, obj> =
     let d = Dictionary<int, obj>()
     for (k, v) in pairs do d.[k] <- v
-    upcast d
+    d :> IDictionary<int, obj>
 
 try
     // Create the table. Schema: id (int64 PK), role (enum with default), name
@@ -51,15 +69,15 @@ try
     // default_value) are forwarded to the daemon verbatim.
     let tid = db.CreateTable(table, [|
         col 1 "id"    "int64"   true
-        col 2 "role"  "enum"    false
+        colEx 2 "role"  "enum"    false (Some [| "admin"; "guest" |]) (Some "guest")
         col 3 "name"  "varchar" false
-        col 4 "score" "float64" false
+        colEx 4 "score" "float64" false None (Some "0.0")
     |])
     printfn "Created table %s (id %d)" table tid
 
     // Insert three rows. Cells map column id -> value.
     db.Put(table, cells [1, box 1; 2, box "admin"; 3, box "Alice"; 4, box 95.5]) |> ignore
-    db.Put(table, cells [1, box 2; 3, box "Bob";   4, box 82.0]) |> ignore
+    db.Put(table, cells [1, box 2; 2, box "guest"; 3, box "Bob";   4, box 82.0]) |> ignore
     db.Put(table, cells [1, box 3; 2, box "guest"; 3, box "Carol"; 4, box 78.3]) |> ignore
     printfn "Inserted 3 rows"
 

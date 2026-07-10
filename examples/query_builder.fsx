@@ -7,7 +7,7 @@
 // query builder to fetch rows by a range condition and by an exact primary-key
 // match. Cleans up by dropping the table.
 
-#I "src/Visorcraft.MongrelDB/bin/Debug/net8.0"
+#I "../src/Visorcraft.MongrelDB/bin/Debug/net8.0"
 #r "Visorcraft.MongrelDB.dll"
 
 open System
@@ -26,24 +26,24 @@ if not (db.Health()) then
     exit 1
 printfn "Connected to MongrelDB"
 
-let col id name ty =
+let col id name ty : IDictionary<string, obj> =
     let d = Dictionary<string, obj>()
     d.["id"] <- box id
     d.["name"] <- box name
     d.["ty"] <- box ty
     d.["primary_key"] <- box (id = 1)
     d.["nullable"] <- box false
-    upcast d
+    d :> IDictionary<string, obj>
 
-let cells pairs =
+let cells pairs : IDictionary<int, obj> =
     let d = Dictionary<int, obj>()
     for (k, v) in pairs do d.[k] <- v
-    upcast d
+    d :> IDictionary<int, obj>
 
-let cond pairs =
+let cond pairs : IDictionary<string, obj> =
     let d = Dictionary<string, obj>()
     for (k, v) in pairs do d.[k] <- v
-    upcast d
+    d :> IDictionary<string, obj>
 
 try
     db.CreateTable(table, [|
