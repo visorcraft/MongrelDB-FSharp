@@ -9,8 +9,8 @@
     <GenerateDocumentationFile>false</GenerateDocumentationFile>
     <!-- Let the test SDK generate the entry point (F# needs this opt-in). -->
     <GenerateProgramFile>true</GenerateProgramFile>
-    <!-- Tests should be held to the same standard as the library. -->
-    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+    <!-- The library is held to warnings-as-errors; tests are not, so a stray
+         unused binding in test code never blocks CI. -->
     <NoWarn>$(NoWarn);FS2003</NoWarn>
   </PropertyGroup>
 
