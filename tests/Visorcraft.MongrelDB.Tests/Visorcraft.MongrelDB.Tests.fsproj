@@ -1,0 +1,34 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <LangVersion>8.0</LangVersion>
+    <Nullable>disable</Nullable>
+    <ImplicitUsings>disable</ImplicitUsings>
+    <IsPackable>false</IsPackable>
+    <GenerateDocumentationFile>false</GenerateDocumentationFile>
+    <!-- Let the test SDK generate the entry point (F# needs this opt-in). -->
+    <GenerateProgramFile>true</GenerateProgramFile>
+    <!-- Tests should be held to the same standard as the library. -->
+    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+    <NoWarn>$(NoWarn);FS2003</NoWarn>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <Compile Include="TestHelper.fs" />
+    <Compile Include="Daemon.fs" />
+    <Compile Include="UnitTests.fs" />
+    <Compile Include="LiveTests.fs" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.10.0" />
+    <PackageReference Include="xunit" Version="2.9.0" />
+    <PackageReference Include="xunit.runner.visualstudio" Version="2.8.2" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\Visorcraft.MongrelDB\Visorcraft.MongrelDB.fsproj" />
+  </ItemGroup>
+
+</Project>

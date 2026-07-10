@@ -1,0 +1,33 @@
+# Agent / assistant instruction files are workspace-local, never published
+AGENTS.md
+CLAUDE.md
+.cursorrules
+.zcode/
+
+# Logs
+*.log
+
+# OS / editor state
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# .NET build output
+bin/
+obj/
+*.user
+*.suo
+*.userprefs
+TestResults/
+
+# NuGet
+*.nupkg
+*.snupkg
+.nuget/
+
+# Prebuilt mongreldb-server binary (downloaded by CI / local testing, not source)
+# (bin/ is already ignored above; this is the conventional download location)

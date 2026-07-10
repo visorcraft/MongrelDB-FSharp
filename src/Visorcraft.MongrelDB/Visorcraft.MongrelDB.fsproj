@@ -1,0 +1,46 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <LangVersion>8.0</LangVersion>
+    <Nullable>disable</Nullable>
+    <ImplicitUsings>disable</ImplicitUsings>
+    <GenerateDocumentationFile>true</GenerateDocumentationFile>
+    <!-- Treat warnings as errors so the client stays clean. -->
+    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+    <NoWarn>$(NoWarn);FS2003;1591</NoWarn>
+
+    <PackageId>Visorcraft.MongrelDB</PackageId>
+    <Version>0.1.0</Version>
+    <Authors>Visorcraft</Authors>
+    <Company>Visorcraft LLC</Company>
+    <Description>Pure F# HTTP client for MongrelDB - typed CRUD, fluent query builder, idempotent batch transactions, SQL, and schema introspection.</Description>
+    <Copyright>Copyright (c) 2024-2026 VisorCraft LLC</Copyright>
+    <PackageLicenseExpression>MIT OR Apache-2.0</PackageLicenseExpression>
+    <PackageProjectUrl>https://github.com/visorcraft/MongrelDB-FSharp</PackageProjectUrl>
+    <RepositoryUrl>https://github.com/visorcraft/MongrelDB-FSharp</RepositoryUrl>
+    <RepositoryType>git</RepositoryType>
+    <PackageTags>mongreldb;database;client;http;fsharp</PackageTags>
+    <PackageReadmeFile>README.md</PackageReadmeFile>
+
+    <!-- NuGet publishing is opt-in: build by default does not pack. -->
+    <IsPackable>true</IsPackable>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <Compile Include="Exceptions.fs" />
+    <Compile Include="Json.fs" />
+    <Compile Include="Response.fs" />
+    <Compile Include="QueryBuilder.fs" />
+    <Compile Include="Transaction.fs" />
+    <Compile Include="Client.fs" />
+    <Compile Include="AssemblyInfo.fs" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <None Include="..\..\README.md" Pack="true" PackagePath="\" />
+    <None Include="..\..\LICENSE-MIT" Pack="true" PackagePath="\" />
+    <None Include="..\..\LICENSE-APACHE" Pack="true" PackagePath="\" />
+  </ItemGroup>
+
+</Project>
