@@ -84,13 +84,38 @@ type QueryBuilder =
             match el.TryGetProperty("rows") with
             | true, p when p.ValueKind = JsonValueKind.Array ->
                 p.EnumerateArray()
-                |> Seq.map (fun row ->
-                    let d = Dictionary<string, obj>()
-                    for prop in row.EnumerateObject() do
-                        d.[prop.Name] <- Json.toObject(prop.Value)
-                    upcast d)
+                |> Seq.map QueryBuilder.DecodeRow
                 |> Seq.toArray
             | _ -> [||]
+
+    /// <summary>
+    /// Decode one <c>/kit/query</c> row. The daemon returns each row as
+    /// <c>{"row_id": "...", "cells": [col_id, value, col_id, value, ...]}</c>
+    /// with a flat <c>cells</c> array. This expands that flat array into a
+    /// column-id-keyed dictionary (keys are the column id as a string) and
+    /// preserves the <c>row_id</c>.
+    /// </summary>
+    static member private DecodeRow(row: JsonElement) : IDictionary<string, obj> =
+        let d = Dictionary<string, obj>()
+        // Preserve row_id so callers that need the engine-assigned id can read it.
+        match row.TryGetProperty("row_id") with
+        | true, rid -> d.["row_id"] <- Json.toObject(rid)
+        | false, _ -> ()
+        match row.TryGetProperty("cells") with
+        | true, cells when cells.ValueKind = JsonValueKind.Array ->
+            // Flat array: even indices are column ids, odd indices are values.
+            let arr = cells.EnumerateArray() |> Seq.toArray
+            let mutable i = 0
+            while i + 1 < arr.Length do
+                // Column id is a JSON number; use its string form as the key.
+                let colKey =
+                    match arr.[i].ValueKind with
+                    | JsonValueKind.String -> arr.[i].GetString()
+                    | _ -> arr.[i].GetRawText()
+                d.[colKey] <- Json.toObject(arr.[i + 1])
+                i <- i + 2
+        | _ -> ()
+        upcast d
 
     /// <summary>
     /// Whether the most recent <c>Execute</c> result was capped by the limit.
