@@ -17,6 +17,7 @@
   <ItemGroup>
     <Compile Include="TestHelper.fs" />
     <Compile Include="Daemon.fs" />
+    <Compile Include="DaemonFactAttribute.fs" />
     <Compile Include="UnitTests.fs" />
     <Compile Include="LiveTests.fs" />
   </ItemGroup>

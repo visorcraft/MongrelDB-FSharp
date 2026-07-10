@@ -50,7 +50,7 @@ module internal Helpers =
                             let d = Dictionary<string, obj>()
                             for prop in row.EnumerateObject() do
                                 d.[prop.Name] <- Json.toObject(prop.Value)
-                            upcast d)
+                            d :> IDictionary<string, obj>)
                         |> Seq.toArray
                     | _ -> [||]
             with :? JsonException as ex ->
@@ -83,12 +83,6 @@ type Client
         ?password: string,
         ?timeout: TimeSpan,
         ?httpClient: HttpClient) as this =
-
-    /// <summary>Default daemon address used when none is supplied.</summary>
-    static member DefaultBaseUrl = "http://127.0.0.1:8453"
-
-    /// <summary>Maximum response body size (256 MB). Bodies larger than this are aborted with a <c>QueryException</c>.</summary>
-    static member MaxResponseBytes = 268435456
 
     let baseUrl =
         let raw = defaultArg url Client.DefaultBaseUrl
@@ -203,6 +197,12 @@ type Client
             Encoding.UTF8.GetString(bytes)
         let resp = { Response.Status = status; Response.Body = respBody }
         if resp.Success then resp else throwForStatus status resp.Body
+
+    /// <summary>Default daemon address used when none is supplied.</summary>
+    static member DefaultBaseUrl = "http://127.0.0.1:8453"
+
+    /// <summary>Maximum response body size (256 MB). Bodies larger than this are aborted with a <c>QueryException</c>.</summary>
+    static member MaxResponseBytes = 268435456
 
     /// <summary>The daemon base URL the client was configured with (no trailing slash).</summary>
     member _.BaseUrl = baseUrl
@@ -328,7 +328,7 @@ type Client
                         let d = Dictionary<string, obj>()
                         for prop in row.EnumerateObject() do
                             d.[prop.Name] <- Json.toObject(prop.Value)
-                        upcast d)
+                        d :> IDictionary<string, obj>)
                     |> Seq.toArray
                 else [||]
             with :? JsonException -> [||]
@@ -438,3 +438,279 @@ type Client
     interface IDisposable with
         member _.Dispose() =
             if ownsClient then http.Dispose()
+
+// ── QueryBuilder ───────────────────────────────────────────────────────────
+// QueryBuilder and Transaction are declared here (as `and`-recursive partners
+// of Client) because they hold a Client field while Client builds instances of
+// them: the three types are mutually recursive and F# requires them in a single
+// `type ... and ...` group (forward references across separate files are not
+// permitted, even in a `namespace rec`).
+
+/// <summary>
+/// A fluent query builder for the daemon's <c>/kit/query</c> endpoint, where
+/// conditions push down to the engine's specialized indexes for
+/// sub-millisecond lookups.
+///
+/// Condition parameters accept friendly aliases that are translated to the
+/// server's exact on-wire keys before sending (see <c>Where</c>).
+/// </summary>
+and QueryBuilder =
+    private
+        { Client: Client
+          Table: string
+          Conditions: IDictionary<string, obj> list
+          Projection: int[] option
+          Limit: int option
+          mutable LastTruncated: bool }
+
+    /// <summary>Initialize a new QueryBuilder. Normally created via <c>Client.Query</c>.</summary>
+    static member internal Create(client: Client, table: string) =
+        { Client = client
+          Table = table
+          Conditions = []
+          Projection = None
+          Limit = None
+          LastTruncated = false }
+
+    /// <summary>
+    /// Add a native condition (AND-ed). Friendly aliases
+    /// (<c>column</c> -> <c>column_id</c>, <c>min</c>/<c>max</c> ->
+    /// <c>lo</c>/<c>hi</c>) are accepted; the server's canonical keys are
+    /// also accepted as-is.
+    /// </summary>
+    member this.Where(condType: string, parameters: IDictionary<string, obj>) : QueryBuilder =
+        let normalized = QueryBuilder.NormalizeCondition(condType, parameters)
+        let entry : IDictionary<string, obj> = dict [condType, box normalized]
+        { this with Conditions = this.Conditions @ [entry] }
+
+    /// <summary>Set the column projection (column ids to return). <c>null</c> means all columns.</summary>
+    member this.ProjectionOf(columnIds: int[]) : QueryBuilder =
+        { this with Projection = Some columnIds }
+
+    /// <summary>Cap the number of rows returned.</summary>
+    member this.LimitTo(limit: int) : QueryBuilder =
+        { this with Limit = Some limit }
+
+    /// <summary>Build the request payload that will be sent to <c>/kit/query</c>.</summary>
+    member this.Build() : IDictionary<string, obj> =
+        let payload = Dictionary<string, obj>()
+        payload.["table"] <- box this.Table
+        match this.Conditions with
+        | [] -> ()
+        | _ ->
+            let arr = ResizeArray<IDictionary<string, obj>>()
+            for c in this.Conditions do arr.Add(c)
+            payload.["conditions"] <- box (arr.ToArray())
+        match this.Projection with
+        | Some cols -> payload.["projection"] <- box cols
+        | None -> ()
+        match this.Limit with
+        | Some lim -> payload.["limit"] <- box lim
+        | None -> ()
+        upcast payload
+
+    /// <summary>
+    /// Run the query and return the matching rows. Also records whether the
+    /// result was truncated by the limit; check it with <c>Truncated</c>.
+    /// </summary>
+    member this.Execute() : IDictionary<string, obj>[] =
+        let resp = this.Client.Post("/kit/query", this.Build())
+        match Response.json resp with
+        | None ->
+            this.LastTruncated <- false
+            [||]
+        | Some el ->
+            this.LastTruncated <-
+                match el.TryGetProperty("truncated") with
+                | true, p -> p.GetBoolean()
+                | false, _ -> false
+            match el.TryGetProperty("rows") with
+            | true, p when p.ValueKind = JsonValueKind.Array ->
+                p.EnumerateArray()
+                |> Seq.map QueryBuilder.DecodeRow
+                |> Seq.toArray
+            | _ -> [||]
+
+    /// <summary>
+    /// Decode one <c>/kit/query</c> row. The daemon returns each row as
+    /// <c>{"row_id": "...", "cells": [col_id, value, col_id, value, ...]}</c>
+    /// with a flat <c>cells</c> array. This expands that flat array into a
+    /// column-id-keyed dictionary (keys are the column id as a string) and
+    /// preserves the <c>row_id</c>.
+    /// </summary>
+    static member private DecodeRow(row: JsonElement) : IDictionary<string, obj> =
+        let d = Dictionary<string, obj>()
+        // Preserve row_id so callers that need the engine-assigned id can read it.
+        match row.TryGetProperty("row_id") with
+        | true, rid -> d.["row_id"] <- Json.toObject(rid)
+        | false, _ -> ()
+        match row.TryGetProperty("cells") with
+        | true, cells when cells.ValueKind = JsonValueKind.Array ->
+            // Flat array: even indices are column ids, odd indices are values.
+            let arr = cells.EnumerateArray() |> Seq.toArray
+            let mutable i = 0
+            while i + 1 < arr.Length do
+                // Column id is a JSON number; use its string form as the key.
+                let colKey =
+                    match arr.[i].ValueKind with
+                    | JsonValueKind.String -> arr.[i].GetString()
+                    | _ -> arr.[i].GetRawText()
+                d.[colKey] <- Json.toObject(arr.[i + 1])
+                i <- i + 2
+        | _ -> ()
+        upcast d
+
+    /// <summary>
+    /// Whether the most recent <c>Execute</c> result was capped by the limit.
+    /// Returns <c>false</c> until <c>Execute</c> has been called.
+    /// </summary>
+    member this.Truncated = this.LastTruncated
+
+    /// <summary>
+    /// Translate friendly parameter aliases to the server's canonical on-wire
+    /// keys. Both spellings are accepted, so callers may use whichever is clearer.
+    ///
+    /// Generic aliases (all condition types):
+    /// <list>
+    /// <item><c>column</c> -> <c>column_id</c></item>
+    /// <item><c>min</c>/<c>max</c> -> <c>lo</c>/<c>hi</c></item>
+    /// <item><c>min_inclusive</c>/<c>max_inclusive</c> -> <c>lo_inclusive</c>/<c>hi_inclusive</c></item>
+    /// </list>
+    ///
+    /// Type-specific aliases (FTS only):
+    /// <list>
+    /// <item><c>fm_contains</c>: <c>value</c> -> <c>pattern</c></item>
+    /// <item><c>fm_contains_all</c>: <c>value</c> -> <c>patterns</c></item>
+    /// </list>
+    /// </summary>
+    static member NormalizeCondition(condType: string, parameters: IDictionary<string, obj>) : IDictionary<string, obj> =
+        let aliases =
+            dict [
+                "column", "column_id"
+                "min", "lo"
+                "max", "hi"
+                "min_inclusive", "lo_inclusive"
+                "max_inclusive", "hi_inclusive"
+            ]
+        let aliases =
+            match condType with
+            | "fm_contains" ->
+                let d = Dictionary<string, string>(aliases)
+                d.["value"] <- "pattern"
+                d
+            | "fm_contains_all" ->
+                let d = Dictionary<string, string>(aliases)
+                d.["value"] <- "patterns"
+                d
+            | _ -> Dictionary<string, string>(aliases)
+
+        let normalized = Dictionary<string, obj>()
+        for kv in parameters do
+            let canon =
+                match aliases.TryGetValue(kv.Key) with
+                | true, v -> v
+                | false, _ -> kv.Key
+            normalized.[canon] <- kv.Value
+        upcast normalized
+
+// ── Transaction ────────────────────────────────────────────────────────────
+
+/// <summary>
+/// A staged batch transaction. Operations are staged locally and committed
+/// atomically in a single <c>/kit/txn</c> request. The engine enforces
+/// unique, foreign-key, check, and trigger constraints at commit time; on any
+/// violation all operations roll back and <c>Commit</c> raises a
+/// <c>ConflictException</c>.
+///
+/// A Transaction is single-use -- call <c>Commit</c> or <c>Rollback</c> once,
+/// then create a new one with <c>Client.BeginTransaction</c>.
+/// </summary>
+and Transaction =
+    private
+        { Client: Client
+          mutable Ops: IDictionary<string, obj> list
+          mutable Committed: bool }
+
+    /// <summary>Initialize a new Transaction. Normally created via <c>Client.BeginTransaction</c>.</summary>
+    static member internal Create(client: Client) =
+        { Client = client; Ops = []; Committed = false }
+
+    /// <summary>Stage a put (insert) operation. <c>returning</c> asks the daemon to echo the row.</summary>
+    member this.Put(table: string, cells: IDictionary<int, obj>, ?returning: bool) : Transaction =
+        let ret = defaultArg returning false
+        let op =
+            dict [
+                "put", box (dict [
+                    "table", box table
+                    "cells", box (Client.FlattenCells(cells))
+                    "returning", box ret
+                ])
+            ] :> IDictionary<string, obj>
+        this.Ops <- this.Ops @ [op]
+        this
+
+    /// <summary>Stage an upsert (insert-or-update) operation.</summary>
+    member this.Upsert(table: string, cells: IDictionary<int, obj>,
+                       ?updateCells: IDictionary<int, obj>, ?returning: bool) : Transaction =
+        let ret = defaultArg returning false
+        let baseOp =
+            dict [
+                "table", box table
+                "cells", box (Client.FlattenCells(cells))
+                "returning", box ret
+            ]
+        match updateCells with
+        | Some uc -> (baseOp :?> Dictionary<string, obj>).["update_cells"] <- box (Client.FlattenCells(uc))
+        | None -> ()
+        let op = dict ["upsert", box baseOp] :> IDictionary<string, obj>
+        this.Ops <- this.Ops @ [op]
+        this
+
+    /// <summary>Stage a delete by the internal row id.</summary>
+    member this.Delete(table: string, rowId: int64) : Transaction =
+        let op =
+            dict [
+                "delete", box (dict [
+                    "table", box table
+                    "row_id", box rowId
+                ])
+            ] :> IDictionary<string, obj>
+        this.Ops <- this.Ops @ [op]
+        this
+
+    /// <summary>Stage a delete by primary-key value.</summary>
+    member this.DeleteByPk(table: string, pk: obj) : Transaction =
+        let op =
+            dict [
+                "delete_by_pk", box (dict [
+                    "table", box table
+                    "pk", box pk
+                ])
+            ] :> IDictionary<string, obj>
+        this.Ops <- this.Ops @ [op]
+        this
+
+    /// <summary>The number of staged operations.</summary>
+    member this.Count = this.Ops.Length
+
+    /// <summary>
+    /// Commit all staged operations atomically.
+    ///
+    /// <c>idempotencyKey</c> is an optional idempotency key for safe retries --
+    /// the daemon returns the original response on duplicate commits, even
+    /// after a crash. A constraint violation raises <c>ConflictException</c>
+    /// (the engine has already rolled back the entire batch).
+    /// </summary>
+    member this.Commit(?idempotencyKey: string) : IDictionary<string, obj>[] =
+        if this.Committed then
+            raise (QueryException("transaction already committed"))
+        this.Committed <- true
+        if this.Ops.IsEmpty then [||]
+        else this.Client.CommitTxn(this.Ops, defaultArg idempotencyKey null)
+
+    /// <summary>Rollback (discard all staged operations). Raises if the transaction was already committed.</summary>
+    member this.Rollback() : unit =
+        if this.Committed then
+            raise (QueryException("cannot rollback a committed transaction"))
+        this.Ops <- []
+

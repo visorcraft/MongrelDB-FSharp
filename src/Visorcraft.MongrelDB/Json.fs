@@ -12,7 +12,7 @@ module internal Json =
         o
 
     /// <summary>Convert a <c>JsonElement</c> to a plain object (recursive).</summary>
-    let toObject (el: JsonElement) : obj =
+    let rec toObject (el: JsonElement) : obj =
         match el.ValueKind with
         | JsonValueKind.String -> box (el.GetString())
         | JsonValueKind.Number ->

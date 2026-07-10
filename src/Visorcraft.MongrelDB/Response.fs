@@ -3,7 +3,10 @@ namespace Visorcraft.MongrelDB
 open System
 open System.Text.Json
 
-module internal Response =
+/// <summary>HTTP response decoding helpers shared across the client.
+/// Public because the low-level <c>Client.Get/Post/HttpDelete</c> members
+/// expose <c>MongrelDBResponse</c> in their signatures.</summary>
+module Response =
     /// <summary>
     /// Wraps one HTTP response from the daemon. Exposes the raw status code
     /// and body and a <c>json</c> helper for decoding a JSON body.

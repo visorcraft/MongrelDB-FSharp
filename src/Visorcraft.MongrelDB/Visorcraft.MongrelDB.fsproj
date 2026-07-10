@@ -32,8 +32,8 @@
     <Compile Include="Exceptions.fs" />
     <Compile Include="Json.fs" />
     <Compile Include="Response.fs" />
-    <Compile Include="QueryBuilder.fs" />
-    <Compile Include="Transaction.fs" />
+    <!-- QueryBuilder and Transaction are merged into Client.fs as `and`-recursive
+         partners of Client (the three types are mutually recursive). -->
     <Compile Include="Client.fs" />
     <Compile Include="AssemblyInfo.fs" />
   </ItemGroup>

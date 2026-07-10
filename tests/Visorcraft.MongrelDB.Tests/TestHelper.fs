@@ -2,6 +2,7 @@ namespace Visorcraft.MongrelDB.Tests
 
 open System
 open System.Collections.Generic
+open Visorcraft.MongrelDB
 
 /// <summary>Helpers shared by the offline unit tests and the live conformance suite.</summary>
 module TestHelper =
