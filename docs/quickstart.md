@@ -148,7 +148,7 @@ total rows: 2
 |------|--------------|
 | `new Client(url = ...)` | Builds an `HttpClient` targeting one daemon. Safe to share across async workflows. |
 | `db.Health()` | GET `/health`; returns `true` when the daemon answers. Always check before real work. |
-| `db.CreateTable(name, cols)` | POST `/kit/create_table`. Column `id`s are the on-wire identifiers; use them everywhere else. |
+| `db.CreateTable(name, cols)` / `db.CreateTable(name, cols, constraints)` | POST `/kit/create_table`. Column `id`s are the on-wire identifiers; optional `enum_variants`/`default_value` keys and the native `constraints` object are forwarded unchanged. |
 | `db.Put(table, cells)` | Single-op transaction: POST `/kit/txn` with one `put` op. `cells` is flattened to `[col_id, val, ...]`. |
 | `db.Query(table).Where(...)` | Builds a `/kit/query` body. `Where` pushes a condition down to a native index. |
 | `.ProjectionOf([|1;2|])` | Server returns only those column ids, saving bandwidth. |
