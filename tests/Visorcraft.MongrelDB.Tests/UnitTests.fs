@@ -23,6 +23,9 @@ module UnitTests =
         Assert.Contains("\"enum_variants\":[\"low\",\"high\"]", wire)
         Assert.Contains("\"default_value\":3", wire)
         Assert.Contains("\"default_expr\":\"uuid\"", wire)
+        for value, expected in [box "draft", "\"draft\""; box true, "true"; null, "null"] do
+            col.["default_value"] <- value
+            Assert.Contains("\"default_value\":" + expected, JsonSerializer.Serialize(col))
 
     // ── QueryBuilder.NormalizeCondition ────────────────────────────────────
 

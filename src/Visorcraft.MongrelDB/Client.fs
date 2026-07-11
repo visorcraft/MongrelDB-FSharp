@@ -227,6 +227,22 @@ type Client
             el.EnumerateArray() |> Seq.map (fun x -> x.GetString()) |> Seq.toArray
         | _ -> [||]
 
+    member this.SetHistoryRetentionEpochs(epochs: uint64) : uint64 * uint64 =
+        let resp = request HttpMethod.Put "/history/retention"
+                       (Some (dict ["history_retention_epochs", box epochs]))
+        let el = Response.json(resp) |> Option.defaultWith (fun () -> raise (QueryException("malformed retention response")))
+        el.GetProperty("history_retention_epochs").GetUInt64(),
+        el.GetProperty("earliest_retained_epoch").GetUInt64()
+
+    member this.HistoryRetention() : uint64 * uint64 =
+        let resp = this.Get("/history/retention")
+        let el = Response.json(resp) |> Option.defaultWith (fun () -> raise (QueryException("malformed retention response")))
+        el.GetProperty("history_retention_epochs").GetUInt64(),
+        el.GetProperty("earliest_retained_epoch").GetUInt64()
+
+    member this.HistoryRetentionEpochs() = fst (this.HistoryRetention())
+    member this.EarliestRetainedEpoch() = snd (this.HistoryRetention())
+
     /// <summary>Create a table with typed columns. Returns the assigned table id.</summary>
     member this.CreateTable(name: string, columns: IDictionary<string, obj>[]) : int64 =
         let body = dict ["name", box name; "columns", box columns]
@@ -713,4 +729,3 @@ and Transaction =
         if this.Committed then
             raise (QueryException("cannot rollback a committed transaction"))
         this.Ops <- []
-
