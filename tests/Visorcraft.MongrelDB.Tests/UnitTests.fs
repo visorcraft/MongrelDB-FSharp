@@ -10,6 +10,20 @@ open Visorcraft.MongrelDB.Tests.TestHelper
 /// <summary>Offline unit tests for the MongrelDB F# client. No daemon needed.</summary>
 module UnitTests =
 
+    [<Fact>]
+    let ``create-table columns preserve new default wire fields`` () =
+        let col = Dictionary<string, obj>()
+        col.["id"] <- box 1
+        col.["name"] <- box "attempts"
+        col.["ty"] <- box "int64"
+        col.["enum_variants"] <- box [| "low"; "high" |]
+        col.["default_value"] <- box 3
+        col.["default_expr"] <- box "uuid"
+        let wire = JsonSerializer.Serialize([| col |])
+        Assert.Contains("\"enum_variants\":[\"low\",\"high\"]", wire)
+        Assert.Contains("\"default_value\":3", wire)
+        Assert.Contains("\"default_expr\":\"uuid\"", wire)
+
     // ── QueryBuilder.NormalizeCondition ────────────────────────────────────
 
     [<Fact>]

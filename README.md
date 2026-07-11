@@ -35,6 +35,9 @@
 - **Idempotent batch transactions** - operations staged locally and committed atomically, with the engine enforcing unique, foreign-key, and check constraints at commit time. Idempotency keys return the original response on duplicate commits, even after a crash.
 - **Full SQL access** through the DataFusion-backed `/sql` endpoint: recursive CTEs, window functions, `CREATE TABLE AS SELECT`, materialized views, and multi-statement execution.
 - **Schema management**: typed table creation with enum/default fields and native constraints, full schema catalog, and per-table descriptors.
+
+Column dictionaries preserve `enum_variants`, scalar `default_value`, dynamic
+`default_expr` (`"now"` or `"uuid"`), and table `constraints.checks`.
 - **User/role/credentials management** via SQL: Argon2id-hashed catalog users, roles, and `GRANT`/`REVOKE` table-level permissions, all executed through `Sql`.
 - **Maintenance**: compaction (all tables or per-table).
 - **Auth**: Bearer token (`--auth-token` mode) and HTTP Basic (`--auth-users` mode), with the bearer token taking precedence.
