@@ -71,7 +71,7 @@ try
         col 1 "id"    "int64"   true
         colEx 2 "role"  "enum"    false (Some [| "admin"; "guest" |]) (Some "guest")
         col 3 "name"  "varchar" false
-        colEx 4 "score" "float64" false None (Some "0.0")
+        colEx 4 "score" "float64" false None (Some 0.0)
     |])
     printfn "Created table %s (id %d)" table tid
 
