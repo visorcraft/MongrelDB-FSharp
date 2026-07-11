@@ -349,3 +349,79 @@ type LiveTests () =
                 c.Put(name, r2) |> ignore)
             Assert.False(String.IsNullOrEmpty(err.ErrorCode))
         finally cleanup c name
+
+    // ── History retention live tests ───────────────────────────────────────
+
+    [<DaemonFact>]
+    member _.``history retention wide window preserves old epochs`` () =
+        let c = client()
+        let name = uniqueTable("fs_hist_wide")
+        try
+            let _, _ = c.SetHistoryRetentionEpochs(10000uL)
+            let configured = c.HistoryRetentionEpochs()
+            Assert.Equal(10000uL, configured)
+            let floor = c.EarliestRetainedEpoch()
+            freshTable c name [| intCol 1 "id" true; varcharCol 2 "label" |]
+            c.Sql("INSERT INTO " + name + " (id, label) VALUES (1, 'first')") |> ignore
+            c.Sql("UPDATE " + name + " SET label = 'updated' WHERE id = 1") |> ignore
+            // Probe a wide epoch range starting at the floor to tolerate shared
+            // test servers that may already have a high epoch count.
+            let mutable found = false
+            let mutable e = floor
+            while not found && e <= floor + 500uL do
+                let rows =
+                    try c.Sql("SELECT label FROM " + name + " AS OF EPOCH " + string e)
+                    with :? QueryException -> [||]
+                if rows.Length = 1 && (rows.[0].["label"] :?> string) = "first" then
+                    found <- true
+                else
+                    e <- e + 1uL
+            Assert.True(found, "expected to find an epoch that still reads 'first'")
+        finally cleanup c name
+
+    [<DaemonFact>]
+    member _.``history retention lowering drops old epochs`` () =
+        let c = client()
+        let name = uniqueTable("fs_hist_drop")
+        try
+            let _, _ = c.SetHistoryRetentionEpochs(10000uL)
+            Assert.Equal(10000uL, c.HistoryRetentionEpochs())
+            freshTable c name [| intCol 1 "id" true; varcharCol 2 "label" |]
+            c.Sql("INSERT INTO " + name + " (id, label) VALUES (1, 'first')") |> ignore
+            c.Sql("UPDATE " + name + " SET label = 'updated' WHERE id = 1") |> ignore
+            let floor = c.EarliestRetainedEpoch()
+
+            // Locate the epoch that contains the first row.
+            let mutable firstEpoch = Nullable<uint64>()
+            let mutable e = floor
+            while not firstEpoch.HasValue && e <= floor + 500uL do
+                let rows =
+                    try c.Sql("SELECT label FROM " + name + " AS OF EPOCH " + string e)
+                    with :? QueryException -> [||]
+                if rows.Length = 1 && (rows.[0].["label"] :?> string) = "first" then
+                    firstEpoch <- Nullable(e)
+                else
+                    e <- e + 1uL
+            Assert.True(firstEpoch.HasValue, "expected to find an epoch for 'first'")
+
+            // Narrow the window and advance epochs enough to drop the old one.
+            c.SetHistoryRetentionEpochs(1uL) |> ignore
+            for i in 1 .. 10 do
+                c.Sql("INSERT INTO " + name + " (id, label) VALUES (" + string (i + 1) + ", 'x')") |> ignore
+
+            let earliest = c.EarliestRetainedEpoch()
+            Assert.True(earliest > firstEpoch.Value, "expected earliest retained epoch to advance")
+
+            // The old epoch is below the floor and must error out.
+            Assert.Throws<QueryException>(fun () ->
+                c.Sql("SELECT label FROM " + name + " AS OF EPOCH " + string firstEpoch.Value) |> ignore)
+            |> ignore
+
+            // Re-expanding retention does not restore dropped epochs.
+            c.SetHistoryRetentionEpochs(10000uL) |> ignore
+            Assert.Throws<QueryException>(fun () ->
+                c.Sql("SELECT label FROM " + name + " AS OF EPOCH " + string firstEpoch.Value) |> ignore)
+            |> ignore
+        finally
+            try c.SetHistoryRetentionEpochs(1024uL) |> ignore with :? MongrelDBException -> ()
+            cleanup c name

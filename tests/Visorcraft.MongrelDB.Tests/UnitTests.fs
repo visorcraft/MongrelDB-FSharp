@@ -2,13 +2,23 @@ namespace Visorcraft.MongrelDB.Tests
 
 open System
 open System.Collections.Generic
+open System.Net
+open System.Net.Http
 open System.Text.Json
+open System.Threading.Tasks
 open Xunit
 open Visorcraft.MongrelDB
 open Visorcraft.MongrelDB.Tests.TestHelper
 
 /// <summary>Offline unit tests for the MongrelDB F# client. No daemon needed.</summary>
 module UnitTests =
+
+    /// <summary>HttpMessageHandler that records the request and returns a canned response.</summary>
+    type MockHandler(response: HttpResponseMessage, capture: HttpRequestMessage -> unit) =
+        inherit HttpMessageHandler()
+        override _.SendAsync(request, _ct) =
+            capture request
+            Task.FromResult(response)
 
     [<Fact>]
     let ``create-table columns preserve new default wire fields`` () =
@@ -23,9 +33,29 @@ module UnitTests =
         Assert.Contains("\"enum_variants\":[\"low\",\"high\"]", wire)
         Assert.Contains("\"default_value\":3", wire)
         Assert.Contains("\"default_expr\":\"uuid\"", wire)
-        for value, expected in [box "draft", "\"draft\""; box true, "true"; null, "null"] do
+
+        // Matrix of literal default_value scalars: each must round-trip with
+        // its original JSON type.
+        let expectations =
+            [ box "draft", (fun (p: JsonElement) -> p.ValueKind = JsonValueKind.String && p.GetString() = "draft")
+              box 7,       (fun p -> p.ValueKind = JsonValueKind.Number && p.GetInt32() = 7)
+              box true,    (fun p -> p.ValueKind = JsonValueKind.True)
+              null,        (fun p -> p.ValueKind = JsonValueKind.Null)
+              box "now",   (fun p -> p.ValueKind = JsonValueKind.String && p.GetString() = "now") ]
+        for value, check in expectations do
             col.["default_value"] <- value
-            Assert.Contains("\"default_value\":" + expected, JsonSerializer.Serialize(col))
+            let columnWire = JsonSerializer.Serialize(col)
+            use doc = JsonDocument.Parse(columnWire)
+            let actual = doc.RootElement.GetProperty("default_value")
+            Assert.True(check actual, "default_value did not preserve its JSON type for value " + string value)
+
+        // default_expr is a separate key and is preserved verbatim.
+        col.["default_value"] <- null
+        col.["default_expr"] <- box "now"
+        let exprWire = JsonSerializer.Serialize([| col |])
+        use exprDoc = JsonDocument.Parse(exprWire)
+        Assert.Equal("now", exprDoc.RootElement.[0].GetProperty("default_expr").GetString())
+        Assert.Equal(JsonValueKind.Null, exprDoc.RootElement.[0].GetProperty("default_value").ValueKind)
 
     // ── QueryBuilder.NormalizeCondition ────────────────────────────────────
 
@@ -233,3 +263,105 @@ module UnitTests =
         Assert.Equal(box true, o.["ok"])
         let tags = o.["tags"] :?> obj[]
         Assert.Equal(2, tags.Length)
+
+
+    // ── History retention transport/wire tests ─────────────────────────────
+
+    let private runWithMock (status: HttpStatusCode) (body: string) (capture: HttpRequestMessage -> unit) (action: Client -> unit) =
+        use resp = new HttpResponseMessage(status)
+        resp.Content <- new StringContent(body)
+        let handler = new MockHandler(resp, capture)
+        use c = new Client(url = "http://test.example", httpClient = new HttpClient(handler))
+        action c
+
+    [<Fact>]
+    let ``set_history_retention_epochs sends put with only retention key`` () =
+        let mutable req : HttpRequestMessage = null
+        runWithMock HttpStatusCode.OK "{\"history_retention_epochs\":20,\"earliest_retained_epoch\":5}"
+            (fun r -> req <- r)
+            (fun c ->
+                let epochs, earliest = c.SetHistoryRetentionEpochs(20uL)
+                Assert.NotNull(req)
+                Assert.Equal(HttpMethod.Put, req.Method)
+                Assert.Equal("http://test.example/history/retention", req.RequestUri.ToString())
+                let json = req.Content.ReadAsStringAsync().Result
+                Assert.Equal("{\"history_retention_epochs\":20}", json)
+                use doc = JsonDocument.Parse(json)
+                Assert.Equal(1, doc.RootElement.EnumerateObject() |> Seq.length)
+                Assert.Equal(20uL, epochs)
+                Assert.Equal(5uL, earliest))
+
+    [<Fact>]
+    let ``history_retention_epochs getter sends get and parses response`` () =
+        let mutable req : HttpRequestMessage = null
+        runWithMock HttpStatusCode.OK "{\"history_retention_epochs\":42,\"earliest_retained_epoch\":7}"
+            (fun r -> req <- r)
+            (fun c ->
+                Assert.Equal(42uL, c.HistoryRetentionEpochs())
+                Assert.NotNull(req)
+                Assert.Equal(HttpMethod.Get, req.Method)
+                Assert.Equal("http://test.example/history/retention", req.RequestUri.ToString())
+                Assert.Null(req.Content))
+
+    [<Fact>]
+    let ``earliest_retained_epoch getter sends get and parses response`` () =
+        let mutable req : HttpRequestMessage = null
+        runWithMock HttpStatusCode.OK "{\"history_retention_epochs\":42,\"earliest_retained_epoch\":7}"
+            (fun r -> req <- r)
+            (fun c ->
+                Assert.Equal(7uL, c.EarliestRetainedEpoch())
+                Assert.NotNull(req)
+                Assert.Equal(HttpMethod.Get, req.Method)
+                Assert.Equal("http://test.example/history/retention", req.RequestUri.ToString()))
+
+    [<Fact>]
+    let ``history_retention endpoints map 403 to AuthException`` () =
+        runWithMock HttpStatusCode.Forbidden "{\"error\":{\"message\":\"forbidden\"}}"
+            (fun _ -> ())
+            (fun c ->
+                Assert.Throws<AuthException>(fun () -> c.HistoryRetentionEpochs() |> ignore) |> ignore
+                Assert.Throws<AuthException>(fun () -> c.SetHistoryRetentionEpochs(10uL) |> ignore) |> ignore
+                Assert.Throws<AuthException>(fun () -> c.EarliestRetainedEpoch() |> ignore) |> ignore)
+
+    let private assertMalformedRaisesQueryException (json: string) (action: Client -> unit) =
+        runWithMock HttpStatusCode.OK json (fun _ -> ()) (fun c ->
+            Assert.Throws<QueryException>(fun () -> action c) |> ignore)
+
+    [<Fact>]
+    let ``history_retention rejects missing epochs key`` () =
+        assertMalformedRaisesQueryException "{\"earliest_retained_epoch\":5}"
+            (fun c -> c.HistoryRetentionEpochs() |> ignore)
+        assertMalformedRaisesQueryException "{\"earliest_retained_epoch\":5}"
+            (fun c -> c.SetHistoryRetentionEpochs(10uL) |> ignore)
+
+    [<Fact>]
+    let ``history_retention rejects missing earliest key`` () =
+        assertMalformedRaisesQueryException "{\"history_retention_epochs\":20}"
+            (fun c -> c.EarliestRetainedEpoch() |> ignore)
+        assertMalformedRaisesQueryException "{\"history_retention_epochs\":20}"
+            (fun c -> c.SetHistoryRetentionEpochs(10uL) |> ignore)
+
+    [<Fact>]
+    let ``history_retention rejects extra keys`` () =
+        assertMalformedRaisesQueryException "{\"history_retention_epochs\":20,\"earliest_retained_epoch\":5,\"extra\":1}"
+            (fun c -> c.HistoryRetentionEpochs() |> ignore)
+
+    [<Fact>]
+    let ``history_retention rejects non-integer epochs value`` () =
+        assertMalformedRaisesQueryException "{\"history_retention_epochs\":\"twenty\",\"earliest_retained_epoch\":5}"
+            (fun c -> c.HistoryRetentionEpochs() |> ignore)
+
+    [<Fact>]
+    let ``history_retention rejects non-integer earliest value`` () =
+        assertMalformedRaisesQueryException "{\"history_retention_epochs\":20,\"earliest_retained_epoch\":\"five\"}"
+            (fun c -> c.EarliestRetainedEpoch() |> ignore)
+
+    [<Fact>]
+    let ``history_retention rejects negative epochs value`` () =
+        assertMalformedRaisesQueryException "{\"history_retention_epochs\":-1,\"earliest_retained_epoch\":5}"
+            (fun c -> c.HistoryRetentionEpochs() |> ignore)
+
+    [<Fact>]
+    let ``history_retention rejects negative earliest value`` () =
+        assertMalformedRaisesQueryException "{\"history_retention_epochs\":20,\"earliest_retained_epoch\":-1}"
+            (fun c -> c.EarliestRetainedEpoch() |> ignore)

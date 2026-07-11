@@ -160,15 +160,70 @@ total rows: 2
 
 The column dictionaries passed to `CreateTable` are forwarded to the daemon
 verbatim, so any column-level constraint the engine supports is just another
-key. Two useful ones:
+key. Three useful ones:
 
 - `enum_variants` (`string[]`) - restricts an `enum` column to a fixed set of
   string values. The engine rejects writes that fall outside the set.
-- `default_value` (`string`, `int`, etc.) - the value written into the column
-  when a row omits it. The engine-side default is applied before any
-  client-side default.
+- `default_value` (`string`, `int`, `bool`, explicit `null`, and the literal
+  string `"now"`) - the value written into the column when a row omits it. The
+  engine-side default is applied before any client-side default. `"now"` passed
+  as `default_value` is treated as a literal string, not as the current
+  timestamp.
+- `default_expr` (`"now"` or `"uuid"`) - a dynamic expression evaluated by the
+  engine on each insert. This is **not** an alias for `default_value`; use it
+  when you need a per-row computed default such as the current timestamp or a
+  fresh UUID.
 
-## 7. Common pitfalls
+```fsharp
+let draftCol =
+    let d = Dictionary<string, obj>()
+    d.["id"] <- box 1
+    d.["name"] <- box "status"
+    d.["ty"] <- box "varchar"
+    d.["default_value"] <- box "draft"
+    d.["nullable"] <- box false
+    upcast d
+
+let createdCol =
+    let d = Dictionary<string, obj>()
+    d.["id"] <- box 2
+    d.["name"] <- box "created_at"
+    d.["ty"] <- box "varchar"
+    d.["default_expr"] <- box "now"
+    d.["nullable"] <- box false
+    upcast d
+
+let countCol =
+    let d = Dictionary<string, obj>()
+    d.["id"] <- box 3
+    d.["name"] <- box "count"
+    d.["ty"] <- box "int64"
+    d.["default_value"] <- box 0
+    d.["nullable"] <- box false
+    upcast d
+
+db.CreateTable("tasks", [| draftCol; createdCol; countCol |]) |> ignore
+```
+
+## 7. History retention
+
+MongrelDB keeps a configurable number of MVCC epochs. You can widen or narrow
+the window, inspect the current floor, and run SQL `AS OF EPOCH` queries to
+read past states.
+
+```fsharp
+// Keep the last 1024 epochs of history.
+db.SetHistoryRetentionEpochs(1024uL) |> ignore
+
+printfn "retained epochs: %d" (db.HistoryRetentionEpochs())
+printfn "earliest epoch : %d" (db.EarliestRetainedEpoch())
+
+// Read a past state. The epoch must be >= EarliestRetainedEpoch().
+let past = db.Sql("SELECT label FROM tasks AS OF EPOCH 5")
+for row in past do printfn "past row: %A" row
+```
+
+## 8. Common pitfalls
 
 **Using the column name instead of the column id.** Every on-wire API uses the
 numeric `id` from `CreateTable`, never the `name`. The query builder's `column`

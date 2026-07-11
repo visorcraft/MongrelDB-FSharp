@@ -4,10 +4,8 @@
 
 <h1 align="center">MongrelDB F# Client</h1>
 
-History retention: `SetHistoryRetentionEpochs`, `HistoryRetentionEpochs`, and `EarliestRetainedEpoch`.
-
 <p align="center">
-  <b>Pure F# client for MongrelDB - embedded+server database with SQL, vector search, full-text search, and AI-native retrieval.</b>
+  <b>Pure F# client for MongrelDB - embedded+server database with SQL, vector search, full-text search, AI-native retrieval, and configurable MVCC history retention.</b>
   <br />
   No external dependencies at runtime - built on .NET <code>HttpClient</code> and <code>System.Text.Json</code>. The API mirrors the MongrelDB PHP, Go, Ruby, and Java clients.
 </p>
@@ -38,8 +36,14 @@ History retention: `SetHistoryRetentionEpochs`, `HistoryRetentionEpochs`, and `E
 - **Full SQL access** through the DataFusion-backed `/sql` endpoint: recursive CTEs, window functions, `CREATE TABLE AS SELECT`, materialized views, and multi-statement execution.
 - **Schema management**: typed table creation with enum/default fields and native constraints, full schema catalog, and per-table descriptors.
 
-Column dictionaries preserve `enum_variants`, scalar `default_value`, dynamic
+Column dictionaries preserve `enum_variants`, scalar `default_value` (strings,
+numbers, booleans, explicit `null`, and the literal string `"now"`), dynamic
 `default_expr` (`"now"` or `"uuid"`), and table `constraints.checks`.
+`default_expr` is not an alias for `default_value`; it is evaluated by the
+engine on each insert.
+- **History retention and time-travel queries**: configure the number of MVCC
+epochs kept with `SetHistoryRetentionEpochs`, inspect the floor with
+`EarliestRetainedEpoch`, and read past states via SQL `AS OF EPOCH`.
 - **User/role/credentials management** via SQL: Argon2id-hashed catalog users, roles, and `GRANT`/`REVOKE` table-level permissions, all executed through `Sql`.
 - **Maintenance**: compaction (all tables or per-table).
 - **Auth**: Bearer token (`--auth-token` mode) and HTTP Basic (`--auth-users` mode), with the bearer token taking precedence.
@@ -198,6 +202,10 @@ with
 | `Compact()` -> `IDictionary` | Compact all tables |
 | `CompactTable(name)` -> `IDictionary` | Compact one table |
 | `BeginTransaction()` -> `Transaction` | Start a batch |
+| `HistoryRetention()` -> `uint64 * uint64` | Current retention window (`history_retention_epochs`, `earliest_retained_epoch`) |
+| `HistoryRetentionEpochs()` -> `uint64` | Current `history_retention_epochs` value |
+| `EarliestRetainedEpoch()` -> `uint64` | Lowest queryable epoch for `AS OF EPOCH` |
+| `SetHistoryRetentionEpochs(epochs)` -> `uint64 * uint64` | Set the retention window and return the new state |
 | `Get(path)`, `Post(path, body)`, `HttpDelete(path)` -> `Response` | Low-level HTTP |
 
 ### `QueryBuilder`

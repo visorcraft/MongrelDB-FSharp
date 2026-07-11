@@ -31,6 +31,16 @@ module TestHelper =
         d.["nullable"] <- box false
         upcast d
 
+    /// <summary>Build a typed varchar column descriptor.</summary>
+    let varcharCol (id: int) (name: string) : IDictionary<string, obj> =
+        let d = Dictionary<string, obj>()
+        d.["id"] <- box id
+        d.["name"] <- box name
+        d.["ty"] <- box "varchar"
+        d.["primary_key"] <- box false
+        d.["nullable"] <- box false
+        upcast d
+
     /// <summary>A unique table name per call to isolate each test's data.</summary>
     let uniqueTable (prefix: string) : string =
         let stamp = DateTimeOffset.UtcNow.ToUnixTimeSeconds()

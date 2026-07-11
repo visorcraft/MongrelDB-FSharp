@@ -198,6 +198,22 @@ type Client
         let resp = { Response.Status = status; Response.Body = respBody }
         if resp.Success then resp else throwForStatus status resp.Body
 
+    let parseRetentionResponse (resp: Response.MongrelDBResponse) : uint64 * uint64 =
+        let el = Response.json(resp) |> Option.defaultWith (fun () -> raise (QueryException("malformed retention response")))
+        try
+            if el.ValueKind <> JsonValueKind.Object then
+                raise (QueryException("malformed retention response"))
+            let expected = Set.ofList ["history_retention_epochs"; "earliest_retained_epoch"]
+            let actual = el.EnumerateObject() |> Seq.map (fun p -> p.Name) |> Set.ofSeq
+            if actual <> expected then
+                raise (QueryException("malformed retention response"))
+            let epochs = el.GetProperty("history_retention_epochs").GetUInt64()
+            let earliest = el.GetProperty("earliest_retained_epoch").GetUInt64()
+            epochs, earliest
+        with
+        | :? QueryException -> reraise()
+        | ex -> raise (QueryException("malformed retention response", ex))
+
     /// <summary>Default daemon address used when none is supplied.</summary>
     static member DefaultBaseUrl = "http://127.0.0.1:8453"
 
@@ -227,20 +243,21 @@ type Client
             el.EnumerateArray() |> Seq.map (fun x -> x.GetString()) |> Seq.toArray
         | _ -> [||]
 
+    /// <summary>Set the history retention window to <c>epochs</c> epochs and return the daemon-confirmed state.</summary>
     member this.SetHistoryRetentionEpochs(epochs: uint64) : uint64 * uint64 =
         let resp = request HttpMethod.Put "/history/retention"
                        (Some (dict ["history_retention_epochs", box epochs]))
-        let el = Response.json(resp) |> Option.defaultWith (fun () -> raise (QueryException("malformed retention response")))
-        el.GetProperty("history_retention_epochs").GetUInt64(),
-        el.GetProperty("earliest_retained_epoch").GetUInt64()
+        parseRetentionResponse resp
 
+    /// <summary>Return the full history-retention response from the daemon.</summary>
     member this.HistoryRetention() : uint64 * uint64 =
         let resp = this.Get("/history/retention")
-        let el = Response.json(resp) |> Option.defaultWith (fun () -> raise (QueryException("malformed retention response")))
-        el.GetProperty("history_retention_epochs").GetUInt64(),
-        el.GetProperty("earliest_retained_epoch").GetUInt64()
+        parseRetentionResponse resp
 
+    /// <summary>Return the configured history retention window in epochs.</summary>
     member this.HistoryRetentionEpochs() = fst (this.HistoryRetention())
+
+    /// <summary>Return the earliest epoch still readable through <c>AS OF EPOCH</c> queries.</summary>
     member this.EarliestRetainedEpoch() = snd (this.HistoryRetention())
 
     /// <summary>Create a table with typed columns. Returns the assigned table id.</summary>
