@@ -43,7 +43,7 @@ let col id name ty pk : IDictionary<string, obj> =
 /// `colEx` builds a column descriptor that includes optional enum_variants and
 /// default_value keys, which the daemon validates (enum columns require a
 /// non-empty enum_variants array).
-let colEx id name ty pk enumVariants (defaultValue: string option) : IDictionary<string, obj> =
+let colEx id name ty pk enumVariants (defaultValue: obj option) : IDictionary<string, obj> =
     let d = Dictionary<string, obj>()
     d.["id"] <- box id
     d.["name"] <- box name
