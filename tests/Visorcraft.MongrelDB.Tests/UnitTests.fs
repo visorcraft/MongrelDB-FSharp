@@ -22,20 +22,38 @@ module UnitTests =
 
     [<Fact>]
     let ``create-table columns preserve new default wire fields`` () =
+        let captureCreateTableBody (columns: IDictionary<string, obj>[]) : string =
+            let mutable req : HttpRequestMessage = null
+            use resp = new HttpResponseMessage(HttpStatusCode.OK)
+            resp.Content <- new StringContent("{\"table_id\": 1}")
+            let handler = new MockHandler(resp, (fun r -> req <- r))
+            use c = new Client(url = "http://test.example", httpClient = new HttpClient(handler))
+            let tableId = c.CreateTable("events", columns)
+            Assert.Equal(1L, tableId)
+            Assert.NotNull(req)
+            Assert.Equal("http://test.example/kit/create_table", req.RequestUri.ToString())
+            req.Content.ReadAsStringAsync().Result
+
         let col = Dictionary<string, obj>()
         col.["id"] <- box 1
         col.["name"] <- box "attempts"
         col.["ty"] <- box "int64"
         col.["enum_variants"] <- box [| "low"; "high" |]
         col.["default_value"] <- box 3
-        col.["default_expr"] <- box "uuid"
-        let wire = JsonSerializer.Serialize([| col |])
-        Assert.Contains("\"enum_variants\":[\"low\",\"high\"]", wire)
-        Assert.Contains("\"default_value\":3", wire)
-        Assert.Contains("\"default_expr\":\"uuid\"", wire)
+        col.["default_expr"] <- box "now"
 
-        // Matrix of literal default_value scalars: each must round-trip with
-        // its original JSON type.
+        let firstJson = captureCreateTableBody [| col |]
+        use firstDoc = JsonDocument.Parse(firstJson)
+        let firstCol = firstDoc.RootElement.GetProperty("columns").EnumerateArray() |> Seq.head
+        Assert.True(firstCol.GetProperty("enum_variants").ValueKind = JsonValueKind.Array)
+        let variants = firstCol.GetProperty("enum_variants").EnumerateArray() |> Seq.toArray
+        Assert.Equal("low", variants.[0].GetString())
+        Assert.Equal("high", variants.[1].GetString())
+        Assert.Equal(3, firstCol.GetProperty("default_value").GetInt32())
+        Assert.Equal("now", firstCol.GetProperty("default_expr").GetString())
+
+        // Matrix of literal default_value scalars: each must round-trip through
+        // the client's CreateTable path with its original JSON type.
         let expectations =
             [ box "draft", (fun (p: JsonElement) -> p.ValueKind = JsonValueKind.String && p.GetString() = "draft")
               box 7,       (fun p -> p.ValueKind = JsonValueKind.Number && p.GetInt32() = 7)
@@ -44,18 +62,21 @@ module UnitTests =
               box "now",   (fun p -> p.ValueKind = JsonValueKind.String && p.GetString() = "now") ]
         for value, check in expectations do
             col.["default_value"] <- value
-            let columnWire = JsonSerializer.Serialize(col)
-            use doc = JsonDocument.Parse(columnWire)
-            let actual = doc.RootElement.GetProperty("default_value")
-            Assert.True(check actual, "default_value did not preserve its JSON type for value " + string value)
+            col.Remove("default_expr") |> ignore
+            let json = captureCreateTableBody [| col |]
+            use doc = JsonDocument.Parse(json)
+            let actual = doc.RootElement.GetProperty("columns").EnumerateArray() |> Seq.head
+            let dv = actual.GetProperty("default_value")
+            Assert.True(check dv, "default_value did not preserve its JSON type for value " + string value)
 
-        // default_expr is a separate key and is preserved verbatim.
+        // default_expr is a separate key and is preserved verbatim through the client.
         col.["default_value"] <- null
         col.["default_expr"] <- box "now"
-        let exprWire = JsonSerializer.Serialize([| col |])
-        use exprDoc = JsonDocument.Parse(exprWire)
-        Assert.Equal("now", exprDoc.RootElement.[0].GetProperty("default_expr").GetString())
-        Assert.Equal(JsonValueKind.Null, exprDoc.RootElement.[0].GetProperty("default_value").ValueKind)
+        let exprJson = captureCreateTableBody [| col |]
+        use exprDoc = JsonDocument.Parse(exprJson)
+        let exprCol = exprDoc.RootElement.GetProperty("columns").EnumerateArray() |> Seq.head
+        Assert.Equal("now", exprCol.GetProperty("default_expr").GetString())
+        Assert.Equal(JsonValueKind.Null, exprCol.GetProperty("default_value").ValueKind)
 
     // ── QueryBuilder.NormalizeCondition ────────────────────────────────────
 
