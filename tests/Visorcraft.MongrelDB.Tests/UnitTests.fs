@@ -13,26 +13,40 @@ open Visorcraft.MongrelDB.Tests.TestHelper
 /// <summary>Offline unit tests for the MongrelDB F# client. No daemon needed.</summary>
 module UnitTests =
 
-    /// <summary>HttpMessageHandler that records the request and returns a canned response.</summary>
-    type MockHandler(response: HttpResponseMessage, capture: HttpRequestMessage -> unit) =
+    /// <summary>
+    /// HttpMessageHandler that records the request and returns a canned response.
+    /// A fresh <c>HttpResponseMessage</c> is built per call so the handler can be
+    /// reused across multiple requests without sharing (and disposing) a single
+    /// response-content stream.
+    /// </summary>
+    type MockHandler(status: HttpStatusCode, body: string, capture: HttpRequestMessage -> unit) =
         inherit HttpMessageHandler()
         override _.SendAsync(request, _ct) =
+            // Read the request body now, while it is still alive: the client
+            // disposes its HttpRequestMessage (and thus its HttpContent) as the
+            // request function returns, so a deferred read would hit a disposed
+            // StringContent. The capture callback is expected to snapshot any
+            // data it needs synchronously here.
             capture request
-            Task.FromResult(response)
+            let resp = new HttpResponseMessage(status)
+            resp.Content <- new StringContent(body)
+            Task.FromResult(resp)
 
     [<Fact>]
     let ``create-table columns preserve new default wire fields`` () =
         let captureCreateTableBody (columns: IDictionary<string, obj>[]) : string =
             let mutable req : HttpRequestMessage = null
-            use resp = new HttpResponseMessage(HttpStatusCode.OK)
-            resp.Content <- new StringContent("{\"table_id\": 1}")
-            let handler = new MockHandler(resp, (fun r -> req <- r))
+            let mutable body : string = null
+            let handler = new MockHandler(HttpStatusCode.OK, "{\"table_id\": 1}", (fun r ->
+                req <- r
+                // Snapshot the body before the client disposes the request content.
+                body <- if isNull r.Content then null else r.Content.ReadAsStringAsync().Result))
             use c = new Client(url = "http://test.example", httpClient = new HttpClient(handler))
             let tableId = c.CreateTable("events", columns)
             Assert.Equal(1L, tableId)
             Assert.NotNull(req)
             Assert.Equal("http://test.example/kit/create_table", req.RequestUri.ToString())
-            req.Content.ReadAsStringAsync().Result
+            body
 
         let col = Dictionary<string, obj>()
         col.["id"] <- box 1
@@ -289,25 +303,26 @@ module UnitTests =
     // ── History retention transport/wire tests ─────────────────────────────
 
     let private runWithMock (status: HttpStatusCode) (body: string) (capture: HttpRequestMessage -> unit) (action: Client -> unit) =
-        use resp = new HttpResponseMessage(status)
-        resp.Content <- new StringContent(body)
-        let handler = new MockHandler(resp, capture)
+        let handler = new MockHandler(status, body, capture)
         use c = new Client(url = "http://test.example", httpClient = new HttpClient(handler))
         action c
 
     [<Fact>]
     let ``set_history_retention_epochs sends put with only retention key`` () =
         let mutable req : HttpRequestMessage = null
+        let mutable body : string = null
         runWithMock HttpStatusCode.OK "{\"history_retention_epochs\":20,\"earliest_retained_epoch\":5}"
-            (fun r -> req <- r)
+            (fun r ->
+                req <- r
+                // Snapshot the body before the client disposes the request content.
+                body <- if isNull r.Content then null else r.Content.ReadAsStringAsync().Result)
             (fun c ->
                 let epochs, earliest = c.SetHistoryRetentionEpochs(20uL)
                 Assert.NotNull(req)
                 Assert.Equal(HttpMethod.Put, req.Method)
                 Assert.Equal("http://test.example/history/retention", req.RequestUri.ToString())
-                let json = req.Content.ReadAsStringAsync().Result
-                Assert.Equal("{\"history_retention_epochs\":20}", json)
-                use doc = JsonDocument.Parse(json)
+                Assert.Equal("{\"history_retention_epochs\":20}", body)
+                use doc = JsonDocument.Parse(body)
                 Assert.Equal(1, doc.RootElement.EnumerateObject() |> Seq.length)
                 Assert.Equal(20uL, epochs)
                 Assert.Equal(5uL, earliest))
