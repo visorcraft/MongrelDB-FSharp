@@ -153,7 +153,7 @@ module UnitTests =
         let cond = Dictionary<string, obj>()
         cond.["column"] <- box 3
         cond.["min"] <- box 100
-        let q = c.Query("orders").Where("range", cond).ProjectionOf([| 1; 2 |]).LimitTo(10)
+        let q = c.Query("orders").Where("range", cond).ProjectionOf([| 1; 2 |]).LimitTo(10).OffsetBy(12)
         let payload = q.Build()
         Assert.Equal(box "orders", payload.["table"])
         let conds = payload.["conditions"] :?> obj[]
@@ -164,6 +164,7 @@ module UnitTests =
         Assert.Equal(box 100, inner.["lo"])
         Assert.Equal(box [| 1; 2 |], payload.["projection"])
         Assert.Equal(box 10, payload.["limit"])
+        Assert.Equal(box 12, payload.["offset"])
 
     [<Fact>]
     let ``Build omits unset fields`` () =
@@ -173,6 +174,7 @@ module UnitTests =
         Assert.False(payload.ContainsKey("conditions"))
         Assert.False(payload.ContainsKey("projection"))
         Assert.False(payload.ContainsKey("limit"))
+        Assert.False(payload.ContainsKey("offset"))
 
     [<Fact>]
     let ``Truncated defaults to false before execute`` () =

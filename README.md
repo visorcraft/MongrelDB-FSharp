@@ -215,6 +215,7 @@ with
 | `Where(condType, parameters)` -> `QueryBuilder` | Add a native condition (AND-ed) |
 | `ProjectionOf(columnIds)` -> `QueryBuilder` | Set column projection |
 | `LimitTo(limit)` -> `QueryBuilder` | Set row limit |
+| `OffsetBy(offset)` -> `QueryBuilder` | Skip matching rows before the limit |
 | `Build()` -> `IDictionary` | Build the request payload |
 | `Execute()` -> `IDictionary[]` | Run the query |
 | `Truncated` -> `bool` | Whether the last `Execute` result hit the limit |

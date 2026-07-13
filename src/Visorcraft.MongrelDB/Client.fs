@@ -494,6 +494,7 @@ and QueryBuilder =
           Conditions: IDictionary<string, obj> list
           Projection: int[] option
           Limit: int option
+          Offset: int option
           mutable LastTruncated: bool }
 
     /// <summary>Initialize a new QueryBuilder. Normally created via <c>Client.Query</c>.</summary>
@@ -503,6 +504,7 @@ and QueryBuilder =
           Conditions = []
           Projection = None
           Limit = None
+          Offset = None
           LastTruncated = false }
 
     /// <summary>
@@ -524,6 +526,10 @@ and QueryBuilder =
     member this.LimitTo(limit: int) : QueryBuilder =
         { this with Limit = Some limit }
 
+    /// <summary>Skip matching rows before applying the limit.</summary>
+    member this.OffsetBy(offset: int) : QueryBuilder =
+        { this with Offset = Some offset }
+
     /// <summary>Build the request payload that will be sent to <c>/kit/query</c>.</summary>
     member this.Build() : IDictionary<string, obj> =
         let payload = Dictionary<string, obj>()
@@ -539,6 +545,9 @@ and QueryBuilder =
         | None -> ()
         match this.Limit with
         | Some lim -> payload.["limit"] <- box lim
+        | None -> ()
+        match this.Offset with
+        | Some offset -> payload.["offset"] <- box offset
         | None -> ()
         upcast payload
 
