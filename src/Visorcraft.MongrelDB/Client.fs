@@ -461,9 +461,16 @@ type Client
     /// Convert a column-id-to-value map to the server's flat
     /// <c>[col_id, value, col_id, value, ...]</c> array.
     /// </summary>
+    /// <summary>
+    /// Convert a column-id-to-value map to the server's flat
+    /// <c>[col_id, value, ...]</c> array in ascending column-id order.
+    /// Stable ordering is required for idempotency keys: the server hashes the
+    /// request payload, and unordered dictionary iteration would make two
+    /// commits of the same cells look like a reuse mismatch.
+    /// </summary>
     static member FlattenCells(cells: IDictionary<int, obj>) : obj[] =
         let flat = ResizeArray<obj>()
-        for kv in cells do
+        for kv in cells |> Seq.sortBy (fun kv -> kv.Key) do
             flat.Add(box kv.Key)
             flat.Add(kv.Value)
         flat.ToArray()
