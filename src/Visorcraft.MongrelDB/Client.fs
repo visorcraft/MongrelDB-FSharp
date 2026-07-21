@@ -283,6 +283,20 @@ type Client
             | false, _ -> 0L
         | None -> 0L
 
+    /// <summary>Create a table with constraints and full secondary-index definitions.</summary>
+    member this.CreateTable(name: string, columns: IDictionary<string, obj>[],
+                            constraints: IDictionary<string, obj>,
+                            indexes: IDictionary<string, obj>[]) : int64 =
+        let body = dict ["name", box name; "columns", box columns;
+                         "constraints", box constraints; "indexes", box indexes]
+        let resp = this.Post("/kit/create_table", body)
+        match Response.json(resp) with
+        | Some el ->
+            match el.TryGetProperty("table_id") with
+            | true, p -> p.GetInt64()
+            | false, _ -> 0L
+        | None -> 0L
+
     /// <summary>Drop a table by name.</summary>
     member this.DropTable(name: string) : unit =
         this.HttpDelete("/tables/" + urlPathEscape(name)) |> ignore

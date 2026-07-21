@@ -189,6 +189,7 @@ with
 | `TableNames()` -> `string[]` | List table names |
 | `CreateTable(name, columns)` -> `int64` | Create a table; returns the table id |
 | `CreateTable(name, columns, constraints)` -> `int64` | Create a table with a constraints block |
+| `CreateTable(name, columns, constraints, indexes)` -> `int64` | Create a table with all six index kinds and options |
 | `DropTable(name)` -> `unit` | Drop a table |
 | `Count(table)` -> `int64` | Row count |
 | `Put(table, cells, ?idempotencyKey)` -> `IDictionary` | Insert a row |
