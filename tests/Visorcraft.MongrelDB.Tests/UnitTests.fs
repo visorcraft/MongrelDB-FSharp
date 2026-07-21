@@ -92,6 +92,24 @@ module UnitTests =
         Assert.Equal("now", exprCol.GetProperty("default_expr").GetString())
         Assert.Equal(JsonValueKind.Null, exprCol.GetProperty("default_value").ValueKind)
 
+    [<Fact>]
+    let ``create-table preserves ANN backend options`` () =
+        let mutable body : string = null
+        let handler = new MockHandler(HttpStatusCode.OK, "{\"table_id\": 1}", (fun request ->
+            body <- request.Content.ReadAsStringAsync().Result))
+        use client = new Client(url = "http://test.example", httpClient = new HttpClient(handler))
+        let diskann = dict ["r", box 64; "l", box 128; "beam_width", box 8; "alpha", box 120]
+        let ann = dict ["algorithm", box "diskann"; "quantization", box "dense"; "diskann", box diskann]
+        let options = dict ["ann", box ann]
+        let index = dict ["name", box "ann"; "column_id", box 2; "kind", box "ann"; "options", box options]
+        client.CreateTable("vectors", [||], dict [], [| index |]) |> ignore
+        use doc = JsonDocument.Parse(body)
+        let actual = doc.RootElement.GetProperty("indexes").EnumerateArray() |> Seq.head
+        let actualAnn = actual.GetProperty("options").GetProperty("ann")
+        Assert.Equal("diskann", actualAnn.GetProperty("algorithm").GetString())
+        Assert.Equal("dense", actualAnn.GetProperty("quantization").GetString())
+        Assert.Equal(8, actualAnn.GetProperty("diskann").GetProperty("beam_width").GetInt32())
+
     // ── QueryBuilder.NormalizeCondition ────────────────────────────────────
 
     [<Fact>]
