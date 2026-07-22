@@ -355,6 +355,56 @@ type Client
     member this.Query(table: string) : QueryBuilder =
         QueryBuilder.Create(this, table)
 
+    // ── Durable recovery + retrieve_text (0.64+) ───────────────────────────
+
+    /// <summary>Text → embed → ANN retrieve (POST /kit/retrieve_text, 0.64+).</summary>
+    member this.RetrieveText(table: string, embeddingColumn: int, text: string, ?k: int, ?deadlineMs: int64, ?maxWork: int64) : IDictionary<string, obj> =
+        if System.String.IsNullOrEmpty(table) then raise (QueryException("table is required"))
+        if System.String.IsNullOrEmpty(text) then raise (QueryException("text is required"))
+        let body = Dictionary<string, obj>()
+        body.["table"] <- box table
+        body.["embedding_column"] <- box embeddingColumn
+        body.["text"] <- box text
+        match k with Some v -> body.["k"] <- box v | None -> ()
+        match deadlineMs with Some v -> body.["deadline_ms"] <- box v | None -> ()
+        match maxWork with Some v -> body.["max_work"] <- box v | None -> ()
+        let resp = this.Post("/kit/retrieve_text", body)
+        match Response.json(resp) with
+        | Some el when el.ValueKind = JsonValueKind.Object ->
+            let d = Dictionary<string, obj>()
+            for prop in el.EnumerateObject() do
+                d.[prop.Name] <- Json.toObject(prop.Value)
+            upcast d
+        | _ ->
+            let d = Dictionary<string, obj>()
+            d.["hits"] <- box [||]
+            d.["provenance"] <- box (Dictionary<string, obj>())
+            upcast d
+
+    /// <summary>Retained SQL status for durable recovery (GET /queries/{query_id}).</summary>
+    member this.QueryStatus(queryId: string) : QueryStatus =
+        if System.String.IsNullOrEmpty(queryId) then raise (QueryException("query_id is required"))
+        let resp = this.Get("/queries/" + urlPathEscape(queryId))
+        match Response.json(resp) with
+        | Some el when el.ValueKind = JsonValueKind.Object ->
+            let d = Dictionary<string, obj>()
+            for prop in el.EnumerateObject() do
+                d.[prop.Name] <- Json.toObject(prop.Value)
+            Durable.parseQueryStatus d
+        | _ -> raise (QueryException("query status response was not a JSON object"))
+
+    /// <summary>Request cancellation of a running SQL query.</summary>
+    member this.CancelQuery(queryId: string) : IDictionary<string, obj> =
+        if System.String.IsNullOrEmpty(queryId) then raise (QueryException("query_id is required"))
+        let resp = this.Post("/queries/" + urlPathEscape(queryId) + "/cancel", Dictionary<string, obj>())
+        match Response.json(resp) with
+        | Some el when el.ValueKind = JsonValueKind.Object ->
+            let d = Dictionary<string, obj>()
+            for prop in el.EnumerateObject() do
+                d.[prop.Name] <- Json.toObject(prop.Value)
+            upcast d
+        | _ -> upcast (Dictionary<string, obj>())
+
     // ── SQL ────────────────────────────────────────────────────────────────
 
     /// <summary>

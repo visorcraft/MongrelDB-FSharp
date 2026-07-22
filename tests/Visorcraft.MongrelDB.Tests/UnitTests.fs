@@ -421,3 +421,53 @@ module UnitTests =
     let ``history_retention rejects negative earliest value`` () =
         assertMalformedRaisesQueryException "{\"history_retention_epochs\":20,\"earliest_retained_epoch\":-1}"
             (fun c -> c.EarliestRetainedEpoch() |> ignore)
+
+    [<Fact>]
+    let ``query status parses structural durable HLC`` () =
+        let json = """{
+          "query_id": "abcdefabcdefabcdefabcdefabcdefab",
+          "status": "committed",
+          "state": "completed",
+          "server_state": "completed",
+          "terminal_state": "committed",
+          "committed": true,
+          "last_commit_epoch": 17,
+          "last_commit_hlc": {
+            "physical_micros": 1700000000000000,
+            "logical": 3,
+            "node_tiebreaker": 7
+          },
+          "outcome": {
+            "committed": true,
+            "last_commit_epoch": 17,
+            "last_commit_hlc": {
+              "physical_micros": 1700000000000000,
+              "logical": 3,
+              "node_tiebreaker": 7
+            },
+            "serialization": "succeeded",
+            "serialization_state": "succeeded",
+            "terminal_state": "committed"
+          },
+          "durable": {
+            "committed": true,
+            "last_commit_epoch": 17,
+            "last_commit_hlc": {
+              "physical_micros": 1700000000000000,
+              "logical": 3,
+              "node_tiebreaker": 7
+            },
+            "serialization": "succeeded",
+            "serialization_state": "succeeded",
+            "terminal_state": "committed"
+          }
+        }"""
+        let status = Durable.parseQueryStatusJson json
+        Assert.True(status.Committed = Some true)
+        match Durable.commitHlc status with
+        | Some hlc ->
+            Assert.Equal(1700000000000000L, hlc.PhysicalMicros)
+            Assert.Equal(3, hlc.Logical)
+            Assert.Equal(7, hlc.NodeTiebreaker)
+        | None -> failwith "expected HLC"
+        Assert.Equal("succeeded", Durable.serializationState status)
