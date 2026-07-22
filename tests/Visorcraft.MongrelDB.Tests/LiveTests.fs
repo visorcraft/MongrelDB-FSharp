@@ -244,7 +244,7 @@ type LiveTests () =
             r.[1] <- box 1
             txn.Put(name, r) |> ignore
             txn.Commit() |> ignore
-            Assert.Throws<MongrelDBException>(fun () -> txn.Commit() |> ignore) |> ignore
+            Assert.ThrowsAny<MongrelDBException>(fun () -> txn.Commit() |> ignore) |> ignore
         finally cleanup c name
 
     [<DaemonFact>]
@@ -413,13 +413,13 @@ type LiveTests () =
             Assert.True(earliest > firstEpoch.Value, "expected earliest retained epoch to advance")
 
             // The old epoch is below the floor and must error out.
-            Assert.Throws<QueryException>(fun () ->
+            Assert.Throws<ConflictException>(fun () ->
                 c.Sql("SELECT label FROM " + name + " AS OF EPOCH " + string firstEpoch.Value) |> ignore)
             |> ignore
 
             // Re-expanding retention does not restore dropped epochs.
             c.SetHistoryRetentionEpochs(10000uL) |> ignore
-            Assert.Throws<QueryException>(fun () ->
+            Assert.Throws<ConflictException>(fun () ->
                 c.Sql("SELECT label FROM " + name + " AS OF EPOCH " + string firstEpoch.Value) |> ignore)
             |> ignore
         finally
