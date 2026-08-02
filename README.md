@@ -282,6 +282,11 @@ Contributions are welcome. Please:
 3. Run `dotnet test` before submitting.
 4. Keep the client dependency-free (BCL only at runtime).
 
+## Related tools
+
+- [Mongrel](https://visorcraft.com/mongreldb) — Commercial multi-system workbench with native MongrelDB support.
+- [MongrelDB Viewer](https://github.com/visorcraft/MongrelDB-Viewer) — Free, open-source MongrelDB GUI and MCP server.
+
 ## License
 
 Dual-licensed under the **MIT License** or the **Apache License, Version 2.0**,
